@@ -1,5 +1,6 @@
 import { JobResponse } from "@/models/job.model";
 import { AiProvider } from "@/models/ai.model";
+import { getOllamaBaseUrl } from "@/utils/ollama";
 
 // Re-export for backwards compatibility
 export { convertResumeToText } from "@/lib/ai/tools/preprocessing";
@@ -26,6 +27,15 @@ export const checkIfModelIsRunning = async (
     return { isRunning: true };
   }
 
+  const OLLAMA = getOllamaBaseUrl();
+  if (!OLLAMA) {
+    return {
+      isRunning: false,
+      error:
+        "Ollama base URL is not configured. Set NEXT_PUBLIC_OLLAMA_BASE_URL (e.g. http://tower:11434).",
+    };
+  }
+
   if (!modelName) {
     return {
       isRunning: false,
@@ -35,7 +45,7 @@ export const checkIfModelIsRunning = async (
 
   try {
     // Check if Ollama service is accessible
-    const response = await fetch("http://localhost:11434/api/ps", {
+    const response = await fetch(`${OLLAMA}/api/ps`, {
       signal: AbortSignal.timeout(5000), // 5 second timeout
     });
 
@@ -72,7 +82,7 @@ export const checkIfModelIsRunning = async (
       error instanceof Error ? error.message : "Unknown error";
     return {
       isRunning: false,
-      error: `Cannot connect to Ollama service. Please make sure Ollama is running. Error: ${errorMessage}`,
+      error: `Cannot connect to Ollama service. Error: ${errorMessage}`,
     };
   }
 };
@@ -85,8 +95,17 @@ export const fetchRunningModels = async (): Promise<{
   models: string[];
   error?: string;
 }> => {
+  const OLLAMA = getOllamaBaseUrl();
+  if (!OLLAMA) {
+    return {
+      models: [],
+      error:
+        "Ollama base URL is not configured. Set NEXT_PUBLIC_OLLAMA_BASE_URL.",
+    };
+  }
+
   try {
-    const response = await fetch("http://localhost:11434/api/ps", {
+    const response = await fetch(`${OLLAMA}/api/ps`, {
       signal: AbortSignal.timeout(5000),
     });
 

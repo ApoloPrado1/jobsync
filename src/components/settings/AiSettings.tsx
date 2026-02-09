@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import {
   AiModel,
@@ -25,6 +26,7 @@ import {
 import { toast } from "../ui/use-toast";
 import { XCircle, CheckCircle } from "lucide-react";
 import { checkIfModelIsRunning } from "@/utils/ai.utils";
+import { getOllamaBaseUrl } from "@/utils/ollama";
 
 interface OllamaModelResponse {
   models: {
@@ -59,12 +61,15 @@ function AiSettings() {
   const [runningModelError, setRunningModelError] = useState<string>("");
   const [runningModelName, setRunningModelName] = useState<string>("");
 
+  const OLLAMA_BASE_URL = useMemo(() => getOllamaBaseUrl(), []);
+
   const setSelectedProvider = (provider: AiProvider) => {
     setSelectedModel({ provider, model: undefined });
     setFetchError("");
     setRunningModelError("");
     setRunningModelName("");
   };
+
   const setSelectedProviderModel = async (model: string) => {
     setSelectedModel({ ...selectedModel, model });
     setRunningModelName("");
@@ -75,7 +80,6 @@ function AiSettings() {
       const result = await checkIfModelIsRunning(model, selectedModel.provider);
       if (result.isRunning && result.runningModelName) {
         setRunningModelName(result.runningModelName);
-        // Keep the model alive indefinitely
         await keepModelAlive(result.runningModelName);
       } else if (result.error) {
         setRunningModelError(result.error);
@@ -103,27 +107,36 @@ function AiSettings() {
   const fetchOllamaModels = async () => {
     setIsLoadingModels(true);
     setFetchError("");
+
+    if (!OLLAMA_BASE_URL) {
+      setFetchError(
+        "Ollama base URL is not configured. Set NEXT_PUBLIC_OLLAMA_BASE_URL (e.g. http://tower:11434).",
+      );
+      setIsLoadingModels(false);
+      return;
+    }
+
     try {
-      const response = await fetch("http://localhost:11434/api/tags");
+      const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
       if (!response.ok) {
         if (selectedModel.provider === AiProvider.OLLAMA) {
           setFetchError(
-            "Failed to fetch Ollama models. Make sure Ollama is running.",
+            "Failed to fetch Ollama models. Make sure Ollama is running and reachable from your browser.",
           );
         }
         return;
       }
+
       const data: OllamaModelResponse = await response.json();
       const modelNames = data.models.map((model) => model.name);
       setOllamaModels(modelNames);
 
-      // Fetch and auto-select running model
       await fetchRunningModel();
     } catch (error) {
       console.error("Error fetching Ollama models:", error);
       if (selectedModel.provider === AiProvider.OLLAMA) {
         setFetchError(
-          "Failed to fetch Ollama models. Make sure Ollama is running.",
+          "Failed to fetch Ollama models. Make sure Ollama is running and reachable from your browser.",
         );
       }
     } finally {
@@ -132,9 +145,9 @@ function AiSettings() {
   };
 
   const keepModelAlive = async (modelName: string) => {
+    if (!OLLAMA_BASE_URL) return;
     try {
-      // Send a request to keep the model loaded for 1 hour
-      await fetch("http://localhost:11434/api/generate", {
+      await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -142,7 +155,7 @@ function AiSettings() {
         body: JSON.stringify({
           model: modelName,
           prompt: "",
-          keep_alive: "1h", // Keep loaded for 1 hour
+          keep_alive: "1h",
           stream: false,
         }),
       });
@@ -154,8 +167,16 @@ function AiSettings() {
   const fetchRunningModel = async () => {
     setRunningModelError("");
     setRunningModelName("");
+
+    if (!OLLAMA_BASE_URL) {
+      setRunningModelError(
+        "Ollama base URL is not configured. Set NEXT_PUBLIC_OLLAMA_BASE_URL.",
+      );
+      return;
+    }
+
     try {
-      const response = await fetch("http://localhost:11434/api/ps");
+      const response = await fetch(`${OLLAMA_BASE_URL}/api/ps`);
       if (!response.ok) {
         if (selectedModel.provider === AiProvider.OLLAMA) {
           setRunningModelError(
@@ -164,19 +185,21 @@ function AiSettings() {
         }
         return;
       }
+
       const data: OllamaRunningModelResponse = await response.json();
       if (data.models && data.models.length > 0) {
-        // Auto-select the first running model
-        const runningModelName = data.models[0].name;
+        const runningName = data.models[0].name;
+
         setSelectedModel({
           provider: AiProvider.OLLAMA,
-          model: runningModelName,
+          model: runningName,
         });
-        // Verify the model is running using shared utility
+
         const result = await checkIfModelIsRunning(
-          runningModelName,
+          runningName,
           AiProvider.OLLAMA,
         );
+
         if (result.isRunning && result.runningModelName) {
           setRunningModelName(result.runningModelName);
           await keepModelAlive(result.runningModelName);
@@ -206,7 +229,6 @@ function AiSettings() {
     try {
       const response = await fetch("/api/ai/deepseek/models");
       if (!response.ok) {
-        // Fall back to enum models if API fails
         const fallbackModels = Object.values(DeepseekModel);
         setDeepseekModels(fallbackModels);
         return;
@@ -218,7 +240,6 @@ function AiSettings() {
       );
     } catch (error) {
       console.error("Error fetching DeepSeek models:", error);
-      // Fall back to enum models if API fails
       setDeepseekModels(Object.values(DeepseekModel));
     } finally {
       setIsLoadingModels(false);
@@ -237,6 +258,7 @@ function AiSettings() {
         return [];
     }
   };
+
   const saveModelSettings = () => {
     if (!selectedModel.model) {
       toast({
@@ -253,6 +275,7 @@ function AiSettings() {
       description: "AI Settings saved successfully.",
     });
   };
+
   return (
     <Card>
       <CardHeader>
@@ -285,6 +308,7 @@ function AiSettings() {
             </SelectContent>
           </Select>
         </div>
+
         <div>
           <Label className="my-4" htmlFor="ai-model">
             Model
@@ -316,6 +340,7 @@ function AiSettings() {
                 </SelectGroup>
               </SelectContent>
             </Select>
+
             {fetchError && (
               <div className="flex items-center gap-1 text-red-600 text-sm mt-2">
                 <XCircle className="h-4 w-4 flex-shrink-0" />
@@ -323,12 +348,14 @@ function AiSettings() {
               </div>
             )}
           </div>
+
           {runningModelName && (
             <div className="flex items-center gap-1 text-green-600 text-sm mt-2">
               <CheckCircle className="h-4 w-4 flex-shrink-0" />
               <span>{runningModelName} is running</span>
             </div>
           )}
+
           {runningModelError && (
             <div className="flex items-center gap-1 text-red-600 text-sm mt-2">
               <XCircle className="h-4 w-4 flex-shrink-0" />
@@ -336,13 +363,13 @@ function AiSettings() {
             </div>
           )}
         </div>
+
         <Button
           className="mt-8"
           onClick={saveModelSettings}
           disabled={
             !selectedModel.model ||
-            (selectedModel.provider === AiProvider.OLLAMA &&
-              !runningModelName) ||
+            (selectedModel.provider === AiProvider.OLLAMA && !runningModelName) ||
             isLoadingModels
           }
         >
